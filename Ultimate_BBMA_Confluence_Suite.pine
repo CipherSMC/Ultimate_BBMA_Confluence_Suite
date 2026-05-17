@@ -1,0 +1,255 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Cipher_SMC
+
+//@version=6
+indicator("Ultimate BBMA Confluence Suite", shorttitle="BBMA Ultimate 2.1.5 [Cipher_SMC]", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
+
+// --- Constants ---
+color BULL_COLOR = #089981
+color BEAR_COLOR = #f23645
+color NEUT_COLOR = #5b9cf6
+
+// --- Groups ---
+string G_CORE  = "Core Settings (BB & MA)"
+string G_MTF   = "Multi-Timeframe Confirmation"
+string G_LOGIC = "Signal Logic & Strictness"
+string G_TOG   = "Signal Visibility Toggles"
+string G_DASH  = "Dashboard & Visuals"
+string G_STYLE = "Style & Colors"
+
+// --- Inputs ---
+// Core
+int bbPeriod      = input.int(20, "BB Period", minval = 1, group = G_CORE)
+float bbMult      = input.float(2.0, "BB StdDev", minval = 0.1, step = 0.1, group = G_CORE)
+int emaTrend      = input.int(50, "Trend EMA", minval = 1, group = G_CORE)
+int emaFilter     = input.int(200, "Filter EMA", minval = 1, group = G_CORE)
+int maFast        = input.int(5, "Fast WMA (MA5)", minval = 1, group = G_CORE)
+int maSlow        = input.int(10, "Slow WMA (MA10)", minval = 1, group = G_CORE)
+
+// MTF
+bool useMTF       = input.bool(true, "Enable MTF Confirmation", group = G_MTF)
+string htf1TF     = input.timeframe("240", "HTF 1 (Direction)", group = G_MTF)
+bool useHTF2      = input.bool(false, "Enable HTF 2 Confirmation", group = G_MTF)
+string htf2TF     = input.timeframe("60", "HTF 2 (Direction)", group = G_MTF)
+bool htfCloseOnly = input.bool(true, "HTF Signals Use Closed Bars", group = G_MTF)
+
+// Logic
+bool strictExt    = input.bool(true, "Strict Extreme (MA5 outside BB)", group = G_LOGIC)
+bool useHardFilter= input.bool(false, "Use EMA 200 as Hard Filter", group = G_LOGIC, tooltip = "If enabled, Buy signals only show above EMA 200, and Sell signals only show below EMA 200.")
+int lookbackSig   = input.int(6, "Signal Sequence Lookback", minval = 1, group = G_LOGIC)
+int minGapBars    = input.int(5, "Signal Minimum Gap", minval = 0, group = G_LOGIC)
+bool showZL       = input.bool(true, "Show Zero Loss (ZL) Zone", group = G_LOGIC)
+int zlBars        = input.int(5, "ZL Zone Duration", minval = 1, group = G_LOGIC)
+
+// Signal Toggles
+bool showEXT  = input.bool(true, "Show Extreme (EXT)", group = G_TOG)
+bool showMHV  = input.bool(true, "Show Market Loss Vol (MHV)", group = G_TOG)
+bool showCSAK = input.bool(true, "Show Strong Direction (CSAK)", group = G_TOG)
+bool showCSM  = input.bool(true, "Show Momentum (CSM)", group = G_TOG)
+bool showRE   = input.bool(true, "Show Re-entry (RE)", group = G_TOG)
+
+// Visuals & Dashboard Settings
+bool showSignals  = input.bool(true, "Show Signal Labels", group = G_DASH)
+bool showBoxes    = input.bool(true, "Show Re-entry Zones", group = G_DASH)
+bool showGhostHTF = input.bool(false, "Show Ghost HTF BB", group = G_DASH)
+bool showDash     = input.bool(true, "Show Dashboard", group = G_DASH)
+string dashCorner = input.string("Top Right", "Dashboard Corner", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = G_DASH)
+string dashSize   = input.string("Small", "Dashboard Size", options = ["Tiny", "Small", "Normal", "Large"], group = G_DASH)
+
+// Style & Customization
+string labelSizeInput = input.string("Small", "Label Size", options = ["Tiny", "Small", "Normal", "Large"], group = G_STYLE)
+string labelStyleInput = input.string("Label Up/Down", "Label Style", options = ["Label Up/Down", "Absolute Circle"], group = G_STYLE)
+string extIcon  = input.string("EXT", "EXT Icon/Text", group = G_STYLE)
+string mhvIcon  = input.string("MHV", "MHV Icon/Text", group = G_STYLE)
+string csakIcon = input.string("CSAK", "CSAK Icon/Text", group = G_STYLE)
+string csmIcon  = input.string("CSM", "CSM Icon/Text", group = G_STYLE)
+string reIcon   = input.string("RE", "RE Icon/Text", group = G_STYLE)
+
+color colorMidBB   = input.color(color.new(color.gray, 50), "Mid BB Color", group = G_STYLE)
+color colorEma50   = input.color(color.aqua, "EMA 50 Color", group = G_STYLE)
+color colorEma200  = input.color(color.new(color.purple, 50), "EMA 200 Color", group = G_STYLE)
+color colorWma5H   = input.color(color.new(BEAR_COLOR, 50), "WMA 5 High Color", group = G_STYLE)
+color colorWma10H  = input.color(color.new(BEAR_COLOR, 80), "WMA 10 High Color", group = G_STYLE)
+color colorWma5L   = input.color(color.new(BULL_COLOR, 50), "WMA 5 Low Color", group = G_STYLE)
+color colorWma10L  = input.color(color.new(BULL_COLOR, 80), "WMA 10 Low Color", group = G_STYLE)
+color colorWmaHighFill = input.color(color.new(color.red, 80), "MA High Channel Fill", group = G_STYLE)
+color colorWmaLowFill  = input.color(color.new(color.green, 80), "MA Low Channel Fill", group = G_STYLE)
+
+// --- Helper Functions ---
+f_get_size(_s) =>
+    _s == "Tiny" ? size.tiny : _s == "Small" ? size.small : _s == "Normal" ? size.normal : size.large
+
+f_get_style(_s, _up) =>
+    _s == "Label Up/Down" ? (_up ? label.style_label_up : label.style_label_down) : label.style_circle
+
+f_get_pos(_p) =>
+    _p == "Top Right" ? position.top_right : _p == "Top Left" ? position.top_left : _p == "Bottom Right" ? position.bottom_right : position.bottom_left
+
+// --- Calculations ---
+[midBB, upperBB, lowerBB] = ta.bb(close, bbPeriod, bbMult)
+ema50  = ta.ema(close, emaTrend)
+ema200 = ta.ema(close, emaFilter)
+wma5H  = ta.wma(high, maFast)
+wma10H = ta.wma(high, maSlow)
+wma5L  = ta.wma(low, maFast)
+wma10L = ta.wma(low, maSlow)
+atr    = ta.atr(14)
+
+// MTF Security Helper
+secHTF(_tf, _expr) => request.security(syminfo.tickerid, _tf, _expr, gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_off)
+
+// HTF 1 Logic
+htf1Cls   = secHTF(htf1TF, close)
+htf1Ema50 = secHTF(htf1TF, ta.ema(close, emaTrend))
+htf1Conf  = secHTF(htf1TF, barstate.isconfirmed)
+htf1Up    = htfCloseOnly ? (htf1Cls > htf1Ema50 and htf1Conf) : (htf1Cls > htf1Ema50)
+htf1Dn    = htfCloseOnly ? (htf1Cls < htf1Ema50 and htf1Conf) : (htf1Cls < htf1Ema50)
+
+// HTF 2 Logic
+htf2Cls   = secHTF(htf2TF, close)
+htf2Ema50 = secHTF(htf2TF, ta.ema(close, emaTrend))
+htf2Conf  = secHTF(htf2TF, barstate.isconfirmed)
+htf2Up    = htfCloseOnly ? (htf2Cls > htf2Ema50 and htf2Conf) : (htf2Cls > htf2Ema50)
+htf2Dn    = htfCloseOnly ? (htf2Cls < htf2Ema50 and htf2Conf) : (htf2Cls < htf2Ema50)
+
+// Combined Direction Logic
+dirOkBuy  = not useMTF or (htf1Up and (not useHTF2 or htf2Up))
+dirOkSell = not useMTF or (htf1Dn and (not useHTF2 or htf2Dn))
+
+// Hard Filter (EMA 200)
+hfBuy  = not useHardFilter or close > ema200
+hfSell = not useHardFilter or close < ema200
+
+// Ghost HTF BB Logic
+htfMid   = secHTF(htf1TF, ta.sma(close, bbPeriod))
+htfStd   = secHTF(htf1TF, ta.stdev(close, bbPeriod))
+htfUpper = htfMid + (htfStd * bbMult)
+htfLower = htfMid - (htfStd * bbMult)
+
+// Signal Logic
+extBuy_base  = (low < lowerBB and close > lowerBB) and (strictExt ? (wma5L < lowerBB) : (wma5L < lowerBB or wma10L < lowerBB))
+extSell_base = (high > upperBB and close < upperBB) and (strictExt ? (wma5H > upperBB) : (wma5H > upperBB or wma10H > upperBB))
+
+sinceExtBuy  = ta.barssince(extBuy_base)
+sinceExtSell = ta.barssince(extSell_base)
+
+mhvBuy_base  = not extBuy_base and (low < lowerBB and close > lowerBB) and sinceExtBuy > 0 and sinceExtBuy < lookbackSig
+mhvSell_base = not extSell_base and (high > upperBB and close < upperBB) and sinceExtSell > 0 and sinceExtSell < lookbackSig
+
+bigBody   = math.abs(close - open) > 0.6 * atr
+csakBuy_base  = bigBody and close > midBB and (sinceExtBuy < lookbackSig or ta.barssince(mhvBuy_base) < lookbackSig)
+csakSell_base = bigBody and close < midBB and (sinceExtSell < lookbackSig or ta.barssince(mhvSell_base) < lookbackSig)
+
+momBuy_base  = close > upperBB and bigBody
+momSell_base = close < lowerBB and bigBody
+
+reBuy_base  = close > ema50 and (low <= math.max(wma5L, wma10L)) and close >= midBB and dirOkBuy and hfBuy
+reSell_base = close < ema50 and (high >= math.min(wma5H, wma10H)) and close <= midBB and dirOkSell and hfSell
+
+// Priority Triggers
+var int lastEXT = 0
+var int lastMHV = 0
+var int lastCSAK = 0
+var int lastCSM = 0
+var int lastRE = 0
+
+trEXT  = (extBuy_base or extSell_base) and (bar_index - lastEXT >= minGapBars)
+trCSM  = not trEXT and (momBuy_base or momSell_base) and (bar_index - lastCSM >= minGapBars)
+trCSAK = not trEXT and not trCSM and (csakBuy_base or csakSell_base) and (bar_index - lastCSAK >= minGapBars)
+trMHV  = not trEXT and not trCSM and not trCSAK and (mhvBuy_base or mhvSell_base) and (bar_index - lastMHV >= minGapBars)
+trRE   = not trEXT and not trCSM and not trCSAK and not trMHV and (reBuy_base or reSell_base) and (bar_index - lastRE >= minGapBars)
+
+if trEXT
+    lastEXT  := bar_index
+if trMHV
+    lastMHV  := bar_index
+if trCSAK
+    lastCSAK := bar_index
+if trCSM
+    lastCSM  := bar_index
+if trRE
+    lastRE   := bar_index
+
+// Visuals
+p_upperBB = plot(upperBB, "Upper BB", color.new(color.gray, 70))
+p_lowerBB = plot(lowerBB, "Lower BB", color.new(color.gray, 70))
+p_midBB   = plot(midBB, "Mid BB", colorMidBB, 2)
+
+int score = 0
+score += close > midBB ? 1 : -1
+score += (close > wma5H and close > wma10H) ? 1 : (close < wma5L and close < wma10L) ? -1 : 0
+score += ta.rising(midBB, 3) ? 1 : -1
+score += close > ema50 ? 1 : -1
+score += close > ema200 ? 1 : -1
+score += (useMTF and htf1Up) ? 1 : (useMTF and htf1Dn) ? -1 : 0
+score += (useMTF and useHTF2 and htf2Up) ? 1 : (useMTF and useHTF2 and htf2Dn) ? -1 : 0
+
+float nScore = math.max(0, math.min(100, (score + 6) * 8.33)) 
+color flowColor = color.from_gradient(nScore, 0, 100, BEAR_COLOR, BULL_COLOR)
+fill(p_upperBB, p_midBB, upperBB, midBB, color.new(flowColor, 85), color.new(flowColor, 100), "Upper Gradient")
+fill(p_lowerBB, p_midBB, lowerBB, midBB, color.new(flowColor, 100), color.new(flowColor, 85), "Lower Gradient")
+
+plot(ema50, "EMA 50", colorEma50, 2)
+plot(ema200, "EMA 200", colorEma200, 1)
+p_w5H = plot(wma5H, "WMA 5 High", colorWma5H)
+p_w10H = plot(wma10H, "WMA 10 High", colorWma10H)
+p_w5L = plot(wma5L, "WMA 5 Low", colorWma5L)
+p_w10L = plot(wma10L, "WMA 10 Low", colorWma10L)
+fill(p_w5H, p_w10H, colorWmaHighFill, "High Channel Fill")
+fill(p_w5L, p_w10L, colorWmaLowFill, "Lower Channel Fill")
+
+// Ghost HTF BB Plots
+plot(showGhostHTF ? htfMid : na, "Ghost HTF Mid", color.new(color.gray, 60), 1, plot.style_linebr)
+plot(showGhostHTF ? htfUpper : na, "Ghost HTF Upper", color.new(color.gray, 80), 1, plot.style_linebr)
+plot(showGhostHTF ? htfLower : na, "Ghost HTF Lower", color.new(color.gray, 80), 1, plot.style_linebr)
+
+if showBoxes and barstate.isconfirmed
+    if trRE and reBuy_base
+        box.new(bar_index, math.max(wma5L, wma10L), bar_index + 5, midBB, bgcolor = color.new(BULL_COLOR, 90), border_color = color.new(BULL_COLOR, 70))
+    if trRE and reSell_base
+        box.new(bar_index, midBB, bar_index + 5, math.min(wma5H, wma10H), bgcolor = color.new(BEAR_COLOR, 90), border_color = color.new(BEAR_COLOR, 70))
+
+// Signals
+lS = f_get_size(labelSizeInput)
+lY(u) => f_get_style(labelStyleInput, u)
+if showSignals
+    if trEXT and showEXT
+        label.new(bar_index, extBuy_base ? low : high, extIcon, color = extBuy_base ? BULL_COLOR : BEAR_COLOR, style = lY(extBuy_base), size = lS, textcolor = color.white)
+    else if trCSM and showCSM
+        label.new(bar_index, momBuy_base ? low : high, csmIcon, color = color.new(momBuy_base ? BULL_COLOR : BEAR_COLOR, 30), style = lY(momBuy_base), size = lS, textcolor = color.white)
+    else if trCSAK and showCSAK
+        label.new(bar_index, csakBuy_base ? low : high, csakIcon, color = csakBuy_base ? BULL_COLOR : BEAR_COLOR, style = lY(csakBuy_base), size = lS, textcolor = color.white)
+    else if trMHV and showMHV
+        label.new(bar_index, mhvBuy_base ? low : high, mhvIcon, color = color.new(mhvBuy_base ? BULL_COLOR : BEAR_COLOR, 50), style = lY(mhvBuy_base), size = lS, textcolor = color.white)
+    else if trRE and showRE
+        label.new(bar_index, reBuy_base ? low : high, reIcon, color = color.new(reBuy_base ? BULL_COLOR : BEAR_COLOR, 50), style = lY(reBuy_base), size = lS, textcolor = color.white)
+
+// Dashboard
+var table dash = na
+if showDash and barstate.islast
+    dash := table.new(f_get_pos(dashCorner), 2, 5, border_width = 1, border_color = color.new(color.gray, 70))
+    int phase = trEXT ? 1 : trMHV ? 2 : trCSAK ? 3 : trCSM ? 4 : trRE ? 5 : 0
+    string phaseTxt = phase == 1 ? "EXHAUSTION" : phase == 2 ? "REVERSAL SETUP" : phase == 3 ? "CONFIRMATION" : phase == 4 ? "MOMENTUM" : phase == 5 ? "TRENDING" : "WAITING"
+    string flowTxt  = nScore > 70 ? "STRONG BULL" : nScore > 50 ? "WEAK BULL" : nScore < 30 ? "STRONG BEAR" : nScore < 50 ? "WEAK BEAR" : "NEUTRAL"
+    tS = f_get_size(dashSize)
+    
+    htfTrendText = useMTF ? (htf1Up ? "HTF1: UP" : htf1Dn ? "HTF1: DOWN" : "HTF1: FLAT") : "MTF OFF"
+    if useMTF and useHTF2
+        htfTrendText := htfTrendText + " | " + (htf2Up ? "HTF2: UP" : htf2Dn ? "HTF2: DOWN" : "HTF2: FLAT")
+    
+    table.cell(dash, 0, 0, "BBMA Metrics", bgcolor = color.new(color.gray, 20), text_color = color.white, text_size = tS)
+    table.cell(dash, 1, 0, "Current Value", bgcolor = color.new(color.gray, 20), text_color = color.white, text_size = tS)
+    table.cell(dash, 0, 1, "Market Flow", text_color = color.white, text_size = tS)
+    table.cell(dash, 1, 1, flowTxt, bgcolor = flowColor, text_color = color.white, text_size = tS)
+    table.cell(dash, 0, 2, "Cycle Phase", text_color = color.white, text_size = tS)
+    table.cell(dash, 1, 2, phaseTxt, bgcolor = color.new(NEUT_COLOR, 20), text_color = color.white, text_size = tS)
+    table.cell(dash, 0, 3, "HTF Trend", text_color = color.white, text_size = tS)
+    table.cell(dash, 1, 3, htfTrendText, bgcolor = color.new(color.gray, 50), text_color = color.white, text_size = tS)
+    table.cell(dash, 0, 4, "Score", text_color = color.white, text_size = tS)
+    table.cell(dash, 1, 4, str.tostring(nScore, "#.#") + "%", text_color = color.white, text_size = tS)
+
+triggerZLBuy  = (trCSM and momBuy_base) or (trCSAK and csakBuy_base)
+triggerZLSell = (trCSM and momSell_base) or (trCSAK and csakSell_base)
+sinceZLBuy  = ta.barssince(triggerZLBuy)
+sinceZLSell = ta.barssince(triggerZLSell)
+bgcolor(showZL and sinceZLBuy <= zlBars ? color.new(BULL_COLOR, 90) : showZL and sinceZLSell <= zlBars ? color.new(BEAR_COLOR, 90) : na)
