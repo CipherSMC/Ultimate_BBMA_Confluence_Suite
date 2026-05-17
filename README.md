@@ -2,6 +2,8 @@
 
 Welcome to the professional user guide for the **Ultimate BBMA Confluence Suite v2.1.5**. This indicator is an institutional-grade analytical tool that combines the high-probability setups of the **BBMA (Bollinger Bands & Moving Averages)** methodology with modern data visualization, multi-timeframe logic, and predictive entry zones.
 
+[BBMA Indicaotr](https://www.tradingview.com/script/h5Xr1hHI-Ultimate-BBMA-Confluence-Suite/)
+
 ---
 
 ## 🚀 1. Core Philosophy
